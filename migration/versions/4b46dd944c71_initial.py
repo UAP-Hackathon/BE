@@ -52,6 +52,11 @@ def upgrade() -> None:
         sa.Column('username', sa.String(), nullable=True),
         sa.Column('contact', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=True),
+        sa.Column('company_name', sa.String(), nullable=True),
+        sa.Column('job_title', sa.String(), nullable=True),
+        sa.Column('message', sa.String(), nullable=True),
+        sa.Column('resume', sa.String(), nullable=True),
+        sa.Column('cv', sa.LargeBinary(), nullable=True),
         sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ),
         sa.PrimaryKeyConstraint('id')
     )

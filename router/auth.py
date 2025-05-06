@@ -7,9 +7,10 @@ from database import get_db
 from pydantic import BaseModel, EmailStr
 from dependencies import get_user_from_session
 from models import User, Session as SessionModel
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from datetime import datetime
 from typing import List
+import base64
 import config
 from models import (
     User,
@@ -82,6 +83,11 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
     # No room data needed
 
+    # Encode CV as base64 if it exists
+    cv_base64 = None
+    if user.cv:
+        cv_base64 = base64.b64encode(user.cv).decode('utf-8')
+    
     # Craft response
     response = JSONResponse(
         status_code=200,
@@ -92,6 +98,13 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             "role": {"id": role.id, "name": role.name, "permissions": permissions},
             "username": user.username,
             "contact": user.contact,
+            "company_name": user.company_name,
+            "job_title": user.job_title,
+            "message": user.message,
+            "resume": user.resume,
+            "has_cv": user.cv is not None,
+            "cv_data": cv_base64,  # Include CV as base64 string
+            "created_at": user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None,
         },
     )
 
@@ -100,8 +113,33 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me")
-async def get_profile(user: User = Depends(get_user_from_session)):
-    return user
+async def get_profile(user: User = Depends(get_user_from_session), db: Session = Depends(get_db)):
+    # If user is a dictionary (from the session), fetch the complete user object
+    if isinstance(user, dict):
+        user = db.query(User).filter(User.id == user["id"]).first()
+
+    # Encode CV as base64 if it exists
+    cv_base64 = None
+    if user.cv:
+        cv_base64 = base64.b64encode(user.cv).decode('utf-8')
+    
+    # Create a response that includes all user fields with CV as base64
+    user_data = {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "username": user.username,
+        "contact": user.contact,
+        "company_name": user.company_name,
+        "job_title": user.job_title,
+        "message": user.message,
+        "resume": user.resume,
+        "has_cv": user.cv is not None,
+        "cv_data": cv_base64,  # Include CV as base64 string
+        "created_at": user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None,
+    }
+    
+    return user_data
 
 
 @router.get("/logout")
@@ -189,3 +227,31 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
     db.commit()
 
     return JSONResponse(status_code=200, content={"message": "Password reset"})
+
+
+@router.get("/download-my-cv")
+async def download_my_cv(
+    current_user: User = Depends(get_user_from_session),
+    db: Session = Depends(get_db),
+):
+    # Get the user from the database
+    if isinstance(current_user, dict):
+        user = db.query(User).filter(User.id == current_user["id"]).first()
+    else:
+        user = current_user
+        
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if user has a CV
+    if not user.cv:
+        raise HTTPException(status_code=404, detail="You haven't uploaded a CV yet")
+    
+    # Return the CV as a downloadable PDF file
+    return Response(
+        content=user.cv,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=my_cv.pdf"
+        }
+    )

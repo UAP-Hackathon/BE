@@ -1,5 +1,5 @@
 from database import Base
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime, LargeBinary
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from sqlalchemy import Float
@@ -61,6 +61,12 @@ class User(Base):
     username = Column(String, nullable=True)
     contact = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    company_name = Column(String, nullable=True)
+    job_title = Column(String, nullable=True)
+    message = Column(String, nullable=True)
+    resume = Column(String, nullable=True)
+    cv = Column(LargeBinary, nullable=True)  # For storing CV PDF as binary data
+    
 
     role = relationship("Role", back_populates="users")
 
