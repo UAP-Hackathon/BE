@@ -81,3 +81,18 @@ class ForgotPassword(Base):
     expires = Column(Float, nullable=False)
 
 
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    company_name = Column(String, nullable=False)
+    location = Column(String, nullable=False)
+    salary = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    skills = Column(JSON, nullable=False)
+    experience = Column(JSON, nullable=False)
+    
+    

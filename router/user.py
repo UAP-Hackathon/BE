@@ -13,6 +13,8 @@ from datetime import datetime
 from typing import List
 from middleware import permission_required
 from models import Role, RolePermission, Permission
+from cv_processor import CVProcessor
+import base64
 
 
 router = APIRouter(
@@ -65,6 +67,20 @@ async def all_users(
         permissions = [permission.name for permission in role_permissions]
 
         # Room data removed as Room model is no longer available
+        cv_base64 = None
+        cv_summary = None
+        cv_key_info = None
+        
+        if user.cv:
+            cv_base64 = base64.b64encode(user.cv).decode('utf-8')
+            
+            # Process the CV to get summary and key info
+            processor = CVProcessor()
+            cv_text = processor.extract_text_from_pdf(user.cv)
+            
+            if cv_text:
+                cv_summary = processor.generate_summary(cv_text)
+                cv_key_info = processor.extract_key_info(cv_text)
 
         # Construct the response for each user
         user_response = {
@@ -77,11 +93,14 @@ async def all_users(
             "company_name": user.company_name,
             "job_title": user.job_title,
             "message": user.message,
-            "resume": user.resume,
+          
             "has_cv": user.cv is not None,  # Only indicate if CV exists, don't return binary data
+            "cv_data": cv_base64,  # Include CV as base64 string
+            "cv_summary": cv_summary,  # Include CV summary if available
+            "cv_key_info": cv_key_info,  # Include key info extracted from CV
             "created_at": user.created_at.strftime(
                 "%Y-%m-%d %H:%M:%S"
-            ) if user.created_at else None,  # Convert datetime to string
+            ) if user.created_at else None  # Convert datetime to string
         }
 
         # Append the user response to the list
@@ -178,4 +197,95 @@ async def signup(
     )
     
     return JSONResponse(status_code=201, content={"message": "Signup successful"})
+
+
+class CVSummaryRequest(BaseModel):
+    user_id: int
+
+@router.post("/cv-summary")
+async def get_cv_summary(
+    request: CVSummaryRequest,
+    current_user: User = Depends(permission_required("VIEW_USER")),
+    db: Session = Depends(get_db),
+):
+    # Check if user exists
+    user = db.query(User).filter(User.id == request.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if user has a CV
+    if not user.cv:
+        raise HTTPException(status_code=404, detail="CV not found for this user")
+    
+    # Process the CV
+    processor = CVProcessor()
+    
+    # Extract text from PDF
+    cv_text = processor.extract_text_from_pdf(user.cv)
+    if not cv_text:
+        return JSONResponse(
+            status_code=400, 
+            content={"message": "Could not extract text from the PDF"}
+        )
+    
+    # Generate summary
+    summary = processor.generate_summary(cv_text)
+    
+    # Extract key information
+    key_info = processor.extract_key_info(cv_text)
+    
+    return JSONResponse(
+        status_code=200,
+        content={
+            "user_id": request.user_id,
+            "summary": summary,
+            "key_info": key_info,
+            "full_text": cv_text[:1000] + "..." if len(cv_text) > 1000 else cv_text  # Truncate long text
+        }
+    )
+
+
+@router.get("/my-cv-summary")
+async def get_my_cv_summary(
+    current_user: User = Depends(get_user_from_session),
+    db: Session = Depends(get_db),
+):
+    # Get the user from the database
+    if isinstance(current_user, dict):
+        user = db.query(User).filter(User.id == current_user["id"]).first()
+    else:
+        user = current_user
+        
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if user has a CV
+    if not user.cv:
+        raise HTTPException(status_code=404, detail="You haven't uploaded a CV yet")
+    
+    # Process the CV
+    processor = CVProcessor()
+    
+    # Extract text from PDF
+    cv_text = processor.extract_text_from_pdf(user.cv)
+    if not cv_text:
+        return JSONResponse(
+            status_code=400, 
+            content={"message": "Could not extract text from your PDF"}
+        )
+    
+    # Generate summary
+    summary = processor.generate_summary(cv_text)
+    
+    # Extract key information
+    key_info = processor.extract_key_info(cv_text)
+    
+    return JSONResponse(
+        status_code=200,
+        content={
+            "summary": summary,
+            "key_info": key_info,
+            "full_text": cv_text[:1000] + "..." if len(cv_text) > 1000 else cv_text  # Truncate long text
+        }
+    )
 
