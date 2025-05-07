@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     email_sender: str
     email_password: str
     database_url: str
+    apikey: str                
 
     class Config:
         env_file = ".env"  # Load environment variables from the .env file
