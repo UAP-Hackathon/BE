@@ -1,5 +1,4 @@
-# CSEDU INVENTORY BACKEND
-
+## Skill Bridge
 ## Setup
 
 0. setup
