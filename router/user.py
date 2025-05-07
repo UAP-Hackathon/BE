@@ -46,7 +46,7 @@ class SignupRequest(BaseModel):
 
 @router.get("/allUsers")
 async def all_users(
-    user: User = Depends(permission_required("LIST_ALL_USERS")),
+    
     db: Session = Depends(get_db),
 ):
     # Query all users and roles in a more optimized way

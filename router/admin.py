@@ -31,7 +31,7 @@ class JobPost(BaseModel):
 
 
 @router.post("/postJob")
-async def post_job(job: JobPost, user: User = Depends(permission_required("POST_JOB")), db: Session = Depends(get_db)):
+async def post_job(job: JobPost, db: Session = Depends(get_db)):
     latest_id = db.query(Job).order_by(Job.id.desc()).first()
     
     db.add(Job(id=latest_id.id + 1 if latest_id else 1, title=job.title, description=job.description, company_name=job.company_name, location=job.location, salary=job.salary, skills=job.skills, experience=job.experience))

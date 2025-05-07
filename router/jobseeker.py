@@ -16,6 +16,7 @@ from cv_processor import CVProcessor
 from openai_utils import SkillAssessment
 import re
 import json
+from fastapi import Query
 
 router = APIRouter(
     prefix="/api/jobseeker",
@@ -41,19 +42,20 @@ class JobMatchFilter(BaseModel):
     location: Optional[str] = None
     include_description: Optional[bool] = False
 
+class CurrentUserID(BaseModel):
+    user_id: int
 
-@router.post("/matchJob", response_model=List[JobMatchResponse])
+
+
+
+@router.get("/matchJob/{user_id}", response_model=List[JobMatchResponse])
 async def match_job(
-    filter_params: JobMatchFilter = None,
-    current_user: User = Depends(get_user_from_session), 
+    user_id: int,
     db: Session = Depends(get_db)
-):
+):  
     """Match jobs with user's skills extracted from their CV"""
     # Get the current user from the database
-    if isinstance(current_user, dict):
-        user = db.query(User).filter(User.id == current_user["id"]).first()
-    else:
-        user = current_user
+    user = db.query(User).filter(User.id ==     user_id).first()
         
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -101,6 +103,8 @@ async def match_job(
     
     # Calculate match scores
     job_matches = []
+
+    filter_params = JobMatchFilter()
     
     for job in jobs:
         # Get job skills and normalize
@@ -172,7 +176,7 @@ class JobId(BaseModel):
     job_id: int
     
 @router.post("/jobs", response_model=Dict[str, Any])
-async def get_job(job_id: JobId, db: Session = Depends(get_db), user: User = Depends(get_user_from_session)):
+async def get_job(job_id: JobId, db: Session = Depends(get_db)):
     """Get a specific job by ID"""
     job = db.query(Job).filter(Job.id == job_id.job_id).first()
     
@@ -198,32 +202,37 @@ class SkillAssessmentRequest(BaseModel):
     num_questions: Optional[int] = Field(5, ge=1, le=10)
     question_type: Optional[str] = Field("mixed", description="Type of questions: mcq, short_answer, or mixed")
 
+class ReactUIRequest(BaseModel):
+    ui_type: str = Field(..., description="Type of UI to generate (e.g., 'landing-page', 'dashboard', 'form', 'e-commerce', 'social-media', 'admin-panel')")
+    features: Optional[List[str]] = Field(["responsive", "dark-mode"], description="Features to include in the UI")
+    difficulty: Optional[str] = Field("medium", description="Difficulty level: easy, medium, hard")
+    description: Optional[str] = Field(None, description="Additional description of what the UI should do")
 
-@router.post("/generate-assessment")
+
+class ReactExamSubmission(BaseModel):
+    exam_id: str
+    answers: List[Dict[str, Any]]
+
+
+@router.get("/generate-assessment")
 async def generate_assessment(
-    request: SkillAssessmentRequest,
-    current_user: User = Depends(get_user_from_session),
+    skills: Optional[List[str]] = Query(None),
+    job_id: Optional[int] = None,
+    num_questions: Optional[int] = Query(5, ge=1, le=10),
+    question_type: Optional[str] = Query("mixed"),
     db: Session = Depends(get_db)
 ):
-    """Generate skill assessment questions based on user skills or job requirements"""
-    # Get the current user from the database
-    if isinstance(current_user, dict):
-        user = db.query(User).filter(User.id == current_user["id"]).first()
-    else:
-        user = current_user
-        
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+
     
     skills_to_assess = []
     
     # If skills are provided directly, use those
-    if request.skills and len(request.skills) > 0:
-        skills_to_assess = request.skills
+    if skills and len(skills) > 0:
+        skills_to_assess = skills
     
     # If job_id is provided, get skills from the job
-    elif request.job_id is not None:
-        job = db.query(Job).filter(Job.id == request.job_id).first()
+    elif job_id is not None:
+        job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         skills_to_assess = job.skills
@@ -272,8 +281,8 @@ async def generate_assessment(
     # Generate questions using OpenAI
     questions = SkillAssessment.generate_questions(
         skills=skills_to_assess,
-        num_questions=request.num_questions,
-        question_type=request.question_type
+        num_questions=num_questions,
+        question_type=question_type
     )
     
     if not questions:
@@ -293,7 +302,6 @@ class AnswerSubmission(BaseModel):
 @router.post("/evaluate-answer")
 async def evaluate_answer(
     submission: AnswerSubmission,
-    current_user: User = Depends(get_user_from_session),
     db: Session = Depends(get_db)
 ):
     """Evaluate a user's answer to an assessment question"""
@@ -331,10 +339,109 @@ class BatchAnswerSubmission(BaseModel):
     questions_and_answers: List[AnswerSubmission]
 
 
+@router.post("/react-ui-task")
+async def get_react_ui_task(
+    request: ReactUIRequest,
+    db: Session = Depends(get_db)
+):
+    """Generate a React UI development task using AI"""
+
+    
+    # Set task difficulty
+    difficulty_level = request.difficulty.lower()
+    
+    # Generate a dynamic UI task using OpenAI
+    ui_task = SkillAssessment.generate_react_ui_task(
+        ui_type=request.ui_type,
+        difficulty=difficulty_level,
+        features=request.features,
+        description=request.description
+    )
+    
+    # Generate a unique task ID
+    task_id = f"react-ui-{datetime.now().timestamp()}"    
+    return {
+        "task_id": task_id,
+        "ui_type": request.ui_type,
+        "difficulty": difficulty_level,
+        "task": ui_task,
+        "submission_instructions": "Create a React application implementing this UI. Submit a GitHub repository link with your solution."
+    }
+
+
+@router.post("/evaluate-react-exam")
+async def evaluate_react_exam(
+    submission: ReactExamSubmission,
+    current_user: CurrentUserID,
+    db: Session = Depends(get_db)
+):
+    """Evaluate a React frontend exam submission"""
+    # Get the user from the database
+    user = db.query(User).filter(User.id == current_user.user_id).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    results = []
+    total_score = 0
+    max_possible_score = len(submission.answers) * 10  # Each question is worth 10 points
+    
+    for answer in submission.answers:
+        # Evaluate the answer based on its type
+        if answer.get("type") == "mcq":
+            # For MCQs, check if the answer matches exactly
+            is_correct = answer.get("user_answer", "") == answer.get("correct_answer", "")
+            score = 10 if is_correct else 0
+            
+            results.append({
+                "question": answer.get("question"),
+                "user_answer": answer.get("user_answer"),
+                "correct_answer": answer.get("correct_answer"),
+                "score": score,
+                "feedback": "Correct!" if is_correct else "Incorrect. The correct answer is: " + answer.get("correct_answer", "")
+            })
+            
+            total_score += score
+        else:  # short_answer
+            # For short answers, check for key points
+            user_answer = answer.get("user_answer", "").lower()
+            key_points = answer.get("key_points", [])
+            matched_points = [point for point in key_points if point.lower() in user_answer]
+            
+            # Calculate score based on percentage of key points covered
+            point_score = len(matched_points) / len(key_points) if key_points else 0
+            score = round(point_score * 10)
+            
+            results.append({
+                "question": answer.get("question"),
+                "user_answer": answer.get("user_answer"),
+                "score": score,
+                "feedback": f"You covered {len(matched_points)} out of {len(key_points)} key points.",
+                "key_points_covered": matched_points,
+                "key_points_missed": [point for point in key_points if point.lower() not in user_answer]
+            })
+            
+            total_score += score
+    
+    # Calculate overall percentage
+    percentage = (total_score / max_possible_score * 100) if max_possible_score > 0 else 0
+    
+    return {
+        "exam_id": submission.exam_id,
+        "results": results,
+        "summary": {
+            "total_score": total_score,
+            "max_possible_score": max_possible_score,
+            "percentage": round(percentage, 2),
+            "pass": percentage >= 70,  # Consider 70% as passing score
+            "grade": "A" if percentage >= 90 else "B" if percentage >= 80 else "C" if percentage >= 70 else "D" if percentage >= 60 else "F"
+        }
+    }
+
+
 @router.post("/evaluate-assessment")
 async def evaluate_assessment(
     submission: BatchAnswerSubmission,
-    current_user: User = Depends(get_user_from_session),
     db: Session = Depends(get_db)
 ):
     """Evaluate all answers in a skill assessment"""
